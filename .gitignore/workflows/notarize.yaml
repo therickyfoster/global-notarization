@@ -1,0 +1,50 @@
+name: Global Repo Notarization
+
+on:
+  workflow_call:  # Allows other repos to call this workflow
+
+jobs:
+  notarize:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Set Up Python & IPFS
+        run: |
+          sudo apt update
+          sudo apt install -y python3-pip tar curl
+          pip3 install opentimestamps-client
+          curl -fsSL https://dist.ipfs.tech/kubo/install.sh | sh
+          ipfs init
+
+      - name: Create Snapshot & Hash
+        run: |
+          tar -czf snapshot.tar.gz *
+          sha256sum snapshot.tar.gz > snapshot.hash
+
+      - name: Timestamp with OpenTimestamps
+        run: |
+          ots stamp snapshot.hash
+          ots upgrade snapshot.hash.ots || true  # Retry later if not finalized
+
+      - name: Upload Snapshot to IPFS
+        run: |
+          CID=$(ipfs add -q snapshot.tar.gz)
+          echo $CID > snapshot.cid
+
+      - name: Update PROOF.md
+        run: |
+          echo "# Proof of Ownership" > PROOF.md
+          echo "SHA-256: $(cat snapshot.hash)" >> PROOF.md
+          echo "Bitcoin Timestamp File: snapshot.hash.ots" >> PROOF.md
+          echo "IPFS CID: $(cat snapshot.cid)" >> PROOF.md
+
+      - name: Commit & Push Proof
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Action"
+          git add PROOF.md snapshot.hash snapshot.hash.ots snapshot.cid
+          git commit -m "Auto-notarized repo snapshot" || echo "No changes to commit"
+          git push origin HEAD || echo "Push skipped (no changes)"
