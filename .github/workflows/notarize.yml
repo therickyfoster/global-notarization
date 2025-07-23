@@ -16,8 +16,13 @@ jobs:
           sudo apt update
           sudo apt install -y python3-pip tar curl
           pip3 install opentimestamps-client
-          curl -fsSL https://dist.ipfs.tech/kubo/install.sh | sh
-          ipfs init
+
+      - name: Install IPFS CLI
+        run: |
+          wget https://dist.ipfs.tech/kubo/v0.29.0/kubo_v0.29.0_linux-amd64.tar.gz -O ipfs.tar.gz
+          tar -xvzf ipfs.tar.gz
+          sudo mv kubo/ipfs /usr/local/bin/ipfs
+          ipfs --version
 
       - name: Create Snapshot & Hash
         run: |
