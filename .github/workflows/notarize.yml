@@ -39,9 +39,15 @@ jobs:
           sleep 5
 
       - name: Create snapshot & hash
-        run: |
-          tar -czf snapshot.tar.gz --exclude=.git .
-          sha256sum snapshot.tar.gz | awk '{print $1}' > snapshot.hash
+  run: |
+    mkdir -p snapshot_stage
+    rsync -a --delete \
+      --exclude='.git' \
+      --exclude='.github' \
+      --exclude='snapshot_stage' \
+      ./ snapshot_stage/
+    tar -C snapshot_stage -czf snapshot.tar.gz .
+    sha256sum snapshot.tar.gz | awk '{print $1}' > snapshot.hash
 
       - name: Timestamp with OpenTimestamps
         run: |
