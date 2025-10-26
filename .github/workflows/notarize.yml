@@ -1,7 +1,7 @@
 permissions:
   contents: write
   
-  name: Global Repo Notarization
+name: Global Repo Notarization
 
 on:
   workflow_call:  # Allows other repos to call this workflow
