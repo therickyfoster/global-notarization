@@ -4,15 +4,15 @@ on:
   workflow_call:
     secrets:
       NOTARIZE_PAT:
-        required: true
+        required: true   # <— the caller must pass this
 
+# We will push with the PAT, so the default token can stay read-only:
 permissions:
   contents: write
 
 jobs:
   notarize:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v4
@@ -40,27 +40,12 @@ jobs:
           nohup ipfs daemon --offline >/dev/null 2>&1 &
           sleep 5
 
-      # --- Snapshot (pick ONE of the two blocks) -------------------------
-      # A) Deterministic: committed files only (recommended for notarization)
+      # Deterministic snapshot of the committed tree:
       - name: Create snapshot & hash (git archive)
         run: |
           set -e
           git -c core.autocrlf=false archive --format=tar.gz -o snapshot.tar.gz HEAD
           sha256sum snapshot.tar.gz | awk '{print $1}' > snapshot.hash
-
-      # B) If you *must* include untracked build outputs, use this instead:
-      # - name: Create snapshot & hash (stage & tar)
-      #   run: |
-      #     set -e
-      #     mkdir -p snapshot_stage
-      #     rsync -a --delete \
-      #       --exclude='.git' \
-      #       --exclude='.github' \
-      #       --exclude='snapshot_stage' \
-      #       ./ snapshot_stage/
-      #     tar -C snapshot_stage -czf snapshot.tar.gz .
-      #     sha256sum snapshot.tar.gz | awk '{print $1}' > snapshot.hash
-      # --- End snapshot choice -------------------------------------------
 
       - name: Timestamp with OpenTimestamps
         run: |
@@ -88,7 +73,7 @@ jobs:
             echo "Workflow: $GITHUB_WORKFLOW • Run #$GITHUB_RUN_NUMBER"
           } > PROOF.md
 
-      - name: Commit & push proof using PAT
+      - name: Commit & push proof using PAT (cross-repo safe)
         env:
           REPO_URL: https://x-access-token:${{ secrets.NOTARIZE_PAT }}@github.com/${{ github.repository }}.git
         run: |
