@@ -1,14 +1,73 @@
-name: Use Global Notarize
+name: Global Repo Notarization
 
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+  workflow_call: {}          # <— REQUIRED for reusable workflows
 
 permissions:
-  contents: write        # ensures push permission is available to the called workflow
+  contents: write            # allows pushing commits back
 
 jobs:
-  call-notarize:
-    uses: TheRickyFoster/global-notarization/.github/workflows/notarize.yml@main
-    secrets: inherit      # passes caller secrets to the called workflow (if needed)
+  notarize:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install deps (Python, OTS, IPFS)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip tar curl wget
+          pip3 install --break-system-packages opentimestamps-client
+
+      - name: Install IPFS CLI
+        run: |
+          wget https://dist.ipfs.tech/kubo/v0.29.0/kubo_v0.29.0_linux-amd64.tar.gz -O ipfs.tar.gz
+          tar -xvzf ipfs.tar.gz
+          sudo mv kubo/ipfs /usr/local/bin/ipfs
+          ipfs --version
+
+      - name: Init IPFS (offline)
+        run: |
+          ipfs init || true
+          ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '["*"]'
+          ipfs config Addresses.API /ip4/127.0.0.1/tcp/5001
+          ipfs config --bool Swarm.DisableNatPortMap true
+          nohup ipfs daemon --offline >/dev/null 2>&1 &
+          sleep 5
+
+      - name: Create snapshot & hash
+        run: |
+          tar -czf snapshot.tar.gz --exclude=.git .
+          sha256sum snapshot.tar.gz | awk '{print $1}' > snapshot.hash
+
+      - name: Timestamp with OpenTimestamps
+        run: |
+          ots stamp snapshot.hash
+          ots upgrade snapshot.hash.ots || true
+
+      - name: Upload snapshot to IPFS
+        id: ipfs
+        run: |
+          CID=$(ipfs add -q snapshot.tar.gz)
+          echo "cid=$CID" >> "$GITHUB_OUTPUT"
+
+      - name: Update PROOF.md
+        run: |
+          {
+            echo "# Proof of Ownership"
+            echo "SHA-256: $(cat snapshot.hash)"
+            echo "Bitcoin Timestamp File: snapshot.hash.ots"
+            echo "IPFS CID: ${{ steps.ipfs.outputs.cid }}"
+            echo "Run: $GITHUB_WORKFLOW @ $GITHUB_RUN_NUMBER"
+          } > PROOF.md
+
+      - name: Commit & push proof
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+          git add PROOF.md snapshot.hash snapshot.hash.ots
+          git commit -m "Auto-notarized repo snapshot [skip ci]" || echo "No changes"
+          git push || echo "Push skipped"
